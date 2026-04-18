@@ -5,16 +5,17 @@ import sys
 
 def update_podcast_feed(title, mp3_filename, description):
     feed_file = 'feed.xml'
-    # Base URL for GitHub Pages
     base_url = "https://mommocmoc.github.io/supercow-ai-news-podcast/audio/"
     mp3_url = base_url + mp3_filename
     
-    # Register namespaces for iTunes tags
-    ET.register_namespace('itunes', "http://www.itunes.com/dtds/podcast-1.0.dtd")
+    ITUNES_NS = "http://www.itunes.com/dtds/podcast-1.0.dtd"
+    ET.register_namespace('itunes', ITUNES_NS)
     
     if not os.path.exists(feed_file):
         rss = ET.Element('rss', version='2.0')
-        rss.set('xmlns:itunes', "http://www.itunes.com/dtds/podcast-1.0.dtd")
+        # xmlns:itunes should be handled by register_namespace + tagging elements
+        # but to be safe and explicit for many readers:
+        rss.set('xmlns:itunes', ITUNES_NS)
         channel = ET.SubElement(rss, 'channel')
         ET.SubElement(channel, 'title').text = 'SuperCow AI News Podcast'
         ET.SubElement(channel, 'link').text = 'https://mommocmoc.github.io/supercow-ai-news-podcast'
@@ -25,20 +26,33 @@ def update_podcast_feed(title, mp3_filename, description):
         rss = tree.getroot()
         channel = rss.find('channel')
 
-    # Add new episode
     item = ET.SubElement(channel, 'item')
     ET.SubElement(item, 'title').text = title
-    # Note: length '0' is usually fine for podcasts, but real length in bytes is better
-    file_size = os.path.getsize(os.path.join('audio', mp3_filename)) if os.path.exists(os.path.join('audio', mp3_filename)) else 0
+    
+    file_path = os.path.join('audio', mp3_filename)
+    file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+    
     ET.SubElement(item, 'enclosure', url=mp3_url, type='audio/mpeg', length=str(file_size))
     ET.SubElement(item, 'pubDate').text = datetime.now().strftime("%a, %d %b %Y %H:%M:%S GMT")
     ET.SubElement(item, 'description').text = description
-    ET.SubElement(item, '{http://www.itunes.com/dtds/podcast-1.0.dtd}summary').text = description
+    ET.SubElement(item, '{%s}summary' % ITUNES_NS).text = description
 
-    # Save file
-    ET.indent(rss, space='  ', level=0)
-    ET.ElementTree(rss).write(feed_file, encoding='UTF-8', xml_declaration=True)
-    print(f"Updated {feed_file} with {mp3_filename}")
+    # Use a simpler way to write to avoid duplication
+    xml_str = ET.tostring(rss, encoding='utf-8').decode('utf-8')
+    # If the library still duplicates, we surgically fix the string
+    if 'xmlns:itunes' in xml_str:
+        # Check if it's there twice in the first 500 chars
+        header = xml_str[:500]
+        if header.count('xmlns:itunes') > 1:
+            # Re-generate without manual set to let register_namespace handle it
+            rss.attrib.pop('xmlns:itunes', None)
+            xml_str = ET.tostring(rss, encoding='utf-8').decode('utf-8')
+
+    with open(feed_file, 'w', encoding='utf-8') as f:
+        f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+        f.write(xml_str)
+        
+    print(f"Surgically Fixed and Updated {feed_file} with {mp3_filename}")
 
 if __name__ == "__main__":
     if len(sys.argv) < 4:
